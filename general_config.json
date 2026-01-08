@@ -1,0 +1,17 @@
+{
+  "project_name": "Daily YouTube AI Briefing",
+  "email_settings": {
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "user": "deine.email@gmail.com",
+    "receiver": "empfaenger.email@example.com"
+  },
+  "ai_settings": {
+    "model": "gemini-1.5-flash"
+  },
+  "working_options": {
+    "max_videos_per_channel": 3,
+    "enable_tts": true,
+    "tts_lang": "de"
+  }
+}
