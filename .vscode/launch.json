@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run: Monitor (Default)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Setup: Generate Configs (--generate-config)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": ["--generate-config"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Test: Email (--test-email)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": ["--test-email"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Test: TTS (--test-tts \"Hello world\")",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": ["--test-tts", "Hello world"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Test: YouTube RSS Channels (--test-youtube)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": ["--test-youtube"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
