@@ -1,0 +1,17 @@
+{
+    "project_name": "My YouTube Assistant",
+    "email_settings": {
+        "host": "smtp.example.com",
+        "port": 587,
+        "user": "me@example.com",
+        "receiver": "you@example.com"
+    },
+    "ai_settings": {
+        "model": "gemini-1.5-flash"
+    },
+    "working_options": {
+        "enable_tts": true,
+        "tts_lang": "en",
+        "max_videos_per_channel": 3
+    }
+}
