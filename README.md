@@ -16,8 +16,8 @@ Ein automatisierter Python-Bot, der deine abonnierten YouTube-Kanäle überwacht
 
 ### 1. Repository klonen
 ```bash
-git clone https://github.com/DEIN_USERNAME/youtube-ai-bot.git
-cd youtube-ai-bot
+git clone https://github.com/bluechip0815/https://github.com/bluechip0815/NewsLogger.git.git
+cd NewsLogger
 ```
 
 ### 2. Abhängigkeiten installieren

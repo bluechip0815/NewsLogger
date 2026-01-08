@@ -3,6 +3,7 @@ import json
 import smtplib
 import feedparser
 import time
+import argparse
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.audio import MIMEAudio
@@ -36,6 +37,51 @@ def get_seen_videos():
 def save_seen_video(video_id):
     with open(SEEN_VIDEOS_FILE, 'a', encoding='utf-8') as f:
         f.write(f"{video_id}\n")
+
+def generate_dummy_configs():
+    """Generates dummy configuration files if they don't exist."""
+    gen_config_file = 'general_config.json'
+    proj_config_file = 'project_config.json'
+
+    if not os.path.exists(gen_config_file):
+        gen_data = {
+            "project_name": "My YouTube Assistant",
+            "email_settings": {
+                "host": "smtp.example.com",
+                "port": 587,
+                "user": "me@example.com",
+                "receiver": "you@example.com"
+            },
+            "ai_settings": {
+                "model": "gemini-1.5-flash"
+            },
+            "working_options": {
+                "enable_tts": True,
+                "tts_lang": "en",
+                "max_videos_per_channel": 3
+            }
+        }
+        with open(gen_config_file, 'w', encoding='utf-8') as f:
+            json.dump(gen_data, f, indent=4)
+        print(f"Created {gen_config_file}")
+    else:
+        print(f"{gen_config_file} already exists.")
+
+    if not os.path.exists(proj_config_file):
+        proj_data = {
+            "subscriptions": [
+                {
+                    "channel_name": "Example Channel",
+                    "channel_id": "UCxxxxxxxxxxxx",
+                    "analysis_prompt": "Summarize this video."
+                }
+            ]
+        }
+        with open(proj_config_file, 'w', encoding='utf-8') as f:
+            json.dump(proj_data, f, indent=4)
+        print(f"Created {proj_config_file}")
+    else:
+        print(f"{proj_config_file} already exists.")
 
 # ---------------------------------------------------------
 # MODUL 1: YOUTUBE & RSS
@@ -200,17 +246,7 @@ def send_email(results, general_config):
 # MAIN LOGIC
 # ---------------------------------------------------------
 
-def main():
-    print("Starte YouTube Monitor...")
-    
-    # 1. Config laden
-    try:
-        gen_conf = load_json('general_config.json')
-        proj_conf = load_json('project_config.json')
-    except FileNotFoundError:
-        print("Fehler: Konfigurationsdateien nicht gefunden.")
-        return
-
+def run_monitor(gen_conf, proj_conf):
     seen_videos = get_seen_videos()
     processing_results = []
     
@@ -270,6 +306,98 @@ def main():
                 save_seen_video(item['id'])
     else:
         print("Nichts zu berichten.")
+
+def test_email_config(gen_conf):
+    """Sends a test email to verify configuration."""
+    print("Sending test email...")
+    dummy_results = [{
+        'channel': 'Test Channel',
+        'title': 'Test Video Title',
+        'link': 'https://www.youtube.com',
+        'id': 'test_video_id',
+        'summary': 'This is a test summary for the email configuration check.',
+        'audio_file': None
+    }]
+    success = send_email(dummy_results, gen_conf)
+    if success:
+        print("Test email sent successfully.")
+    else:
+        print("Failed to send test email.")
+
+def test_tts(text):
+    """Generates a test MP3 from input text."""
+    try:
+        print(f"Generating TTS for: '{text}'")
+        filename = "sound-test.mp3"
+        tts = gTTS(text=text, lang='en', slow=False)
+        tts.save(filename)
+        print(f"Saved: {filename}")
+    except Exception as e:
+        print(f"TTS Error: {e}")
+
+def test_youtube_channels(proj_conf):
+    """Checks if configured channels are reachable via RSS."""
+    print("Checking YouTube channels...")
+    for sub in proj_conf['subscriptions']:
+        channel_id = sub['channel_id']
+        name = sub['channel_name']
+        rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+
+        print(f"Checking '{name}' ({channel_id})...", end=" ")
+        try:
+            feed = feedparser.parse(rss_url)
+            # feedparser usually doesn't raise exceptions but sets 'bozo' bit or returns empty entries
+            # If the channel ID is invalid, YouTube usually returns a 404 which feedparser handles gracefully
+            # but feed.status might be useful if available (e.g. 200 vs 404)
+
+            status = getattr(feed, 'status', None)
+
+            if status == 200:
+                print("OK")
+            elif status == 404:
+                print("FAILED (404 Not Found) - Check Channel ID")
+            else:
+                # If status is missing or other code
+                if feed.entries:
+                     print("OK (Entries found)")
+                elif feed.bozo:
+                     print(f"WARNING (Feed parsing issue: {feed.bozo_exception})")
+                else:
+                     print(f"UNKNOWN (Status: {status})")
+        except Exception as e:
+             print(f"ERROR: {e}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="YouTube Assistant Monitor")
+    parser.add_argument("--generate-config", action="store_true", help="Generate dummy configuration files if missing")
+    parser.add_argument("--test-email", action="store_true", help="Send a test email")
+    parser.add_argument("--test-tts", nargs=1, metavar="TEXT", help="Generate a test MP3 from the given text")
+    parser.add_argument("--test-youtube", action="store_true", help="Check configured YouTube channels")
+
+    args = parser.parse_args()
+
+    if args.generate_config:
+        generate_dummy_configs()
+        return
+
+    # Load configs
+    try:
+        gen_conf = load_json('general_config.json')
+        proj_conf = load_json('project_config.json')
+    except FileNotFoundError:
+        print("Fehler: Konfigurationsdateien nicht gefunden. Nutze --generate-config um Dummy-Dateien zu erstellen.")
+        return
+
+    if args.test_email:
+        test_email_config(gen_conf)
+    elif args.test_tts:
+        test_tts(args.test_tts[0])
+    elif args.test_youtube:
+        test_youtube_channels(proj_conf)
+    else:
+        print("Starte YouTube Monitor...")
+        run_monitor(gen_conf, proj_conf)
 
 if __name__ == "__main__":
     main()
