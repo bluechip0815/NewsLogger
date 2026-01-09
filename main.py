@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 
 # Externe Libraries
 import google.generativeai as genai
+import openai
+import anthropic
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from gtts import gTTS
 
@@ -53,6 +55,7 @@ def generate_dummy_configs():
                 "receiver": "you@example.com"
             },
             "ai_settings": {
+                "provider": "gemini",
                 "model": "gemini-1.5-flash"
             },
             "working_options": {
@@ -126,31 +129,83 @@ def get_video_transcript(video_id):
         return None
 
 # ---------------------------------------------------------
-# MODUL 2: KI ANALYSE (GEMINI)
+# MODUL 2: KI ANALYSE (GEMINI, OPENAI, ANTHROPIC)
 # ---------------------------------------------------------
 
 def analyze_transcript(transcript_text, prompt, config):
-    """Sendet Text an Gemini zur Analyse."""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY nicht in .env gefunden!")
+    """Sendet Text an die konfigurierte KI zur Analyse."""
+    ai_settings = config['ai_settings']
+    provider = ai_settings.get('provider', 'gemini').lower()
+    model_name = ai_settings.get('model')
 
-    genai.configure(api_key=api_key)
-    
-    model_name = config['ai_settings'].get('model', 'gemini-1.5-flash')
-    model = genai.GenerativeModel(model_name)
-
-    # Prompt Engineering: Kontext setzen
     full_prompt = (
         f"Du bist ein hilfreicher Assistent. Deine Aufgabe: {prompt}\n\n"
         f"Hier ist das Video-Transkript:\n{transcript_text}"
     )
 
-    try:
-        response = model.generate_content(full_prompt)
-        return response.text
-    except Exception as e:
-        return f"KI-Analyse fehlgeschlagen: {e}"
+    if provider == 'gemini':
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY nicht in .env gefunden!")
+
+        if not model_name:
+            model_name = 'gemini-1.5-flash'
+
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name)
+
+        try:
+            response = model.generate_content(full_prompt)
+            return response.text
+        except Exception as e:
+            return f"KI-Analyse (Gemini) fehlgeschlagen: {e}"
+
+    elif provider == 'openai':
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY nicht in .env gefunden!")
+
+        if not model_name:
+            model_name = 'gpt-4o'
+
+        client = openai.OpenAI(api_key=api_key)
+
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": full_prompt}
+                ]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"KI-Analyse (OpenAI) fehlgeschlagen: {e}"
+
+    elif provider == 'anthropic':
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY nicht in .env gefunden!")
+
+        if not model_name:
+            model_name = 'claude-3-5-sonnet-20240620'
+
+        client = anthropic.Anthropic(api_key=api_key)
+
+        try:
+            response = client.messages.create(
+                model=model_name,
+                max_tokens=4096,
+                messages=[
+                    {"role": "user", "content": full_prompt}
+                ]
+            )
+            return response.content[0].text
+        except Exception as e:
+            return f"KI-Analyse (Anthropic) fehlgeschlagen: {e}"
+
+    else:
+        return f"Unbekannter AI Provider: {provider}"
 
 # ---------------------------------------------------------
 # MODUL 3: TEXT-TO-SPEECH (TTS)
@@ -367,6 +422,66 @@ def test_youtube_channels(proj_conf):
         except Exception as e:
              print(f"ERROR: {e}")
 
+def test_ai_connections():
+    """Checks connections for all configured AI secrets in .env."""
+    print("Testing AI connections...")
+
+    # 1. Gemini
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if gemini_key:
+        print("Checking Gemini... ", end="")
+        try:
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content("Hello")
+            if response:
+                print("OK")
+            else:
+                print("FAILED (No response)")
+        except Exception as e:
+            print(f"FAILED ({e})")
+    else:
+        print("Skipping Gemini (GEMINI_API_KEY not found)")
+
+    # 2. OpenAI
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if openai_key:
+        print("Checking OpenAI... ", end="")
+        try:
+            client = openai.OpenAI(api_key=openai_key)
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": "Hello"}]
+            )
+            if response.choices[0].message.content:
+                print("OK")
+            else:
+                print("FAILED (No content)")
+        except Exception as e:
+            print(f"FAILED ({e})")
+    else:
+        print("Skipping OpenAI (OPENAI_API_KEY not found)")
+
+    # 3. Anthropic
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        print("Checking Anthropic... ", end="")
+        try:
+            client = anthropic.Anthropic(api_key=anthropic_key)
+            response = client.messages.create(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=100,
+                messages=[{"role": "user", "content": "Hello"}]
+            )
+            if response.content[0].text:
+                print("OK")
+            else:
+                print("FAILED (No content)")
+        except Exception as e:
+            print(f"FAILED ({e})")
+    else:
+        print("Skipping Anthropic (ANTHROPIC_API_KEY not found)")
+
 
 def main():
     parser = argparse.ArgumentParser(description="YouTube Assistant Monitor")
@@ -374,6 +489,7 @@ def main():
     parser.add_argument("--test-email", action="store_true", help="Send a test email")
     parser.add_argument("--test-tts", nargs=1, metavar="TEXT", help="Generate a test MP3 from the given text")
     parser.add_argument("--test-youtube", action="store_true", help="Check configured YouTube channels")
+    parser.add_argument("--test-ai", action="store_true", help="Test connection to configured AI providers")
 
     args = parser.parse_args()
 
@@ -395,6 +511,8 @@ def main():
         test_tts(args.test_tts[0])
     elif args.test_youtube:
         test_youtube_channels(proj_conf)
+    elif args.test_ai:
+        test_ai_connections()
     else:
         print("Starte YouTube Monitor...")
         run_monitor(gen_conf, proj_conf)
