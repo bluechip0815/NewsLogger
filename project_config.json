@@ -1,9 +1,0 @@
-{
-    "subscriptions": [
-        {
-            "channel_name": "Example Channel",
-            "channel_id": "UCxxxxxxxxxxxx",
-            "analysis_prompt": "Summarize this video."
-        }
-    ]
-}
