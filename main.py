@@ -15,6 +15,7 @@ def run_monitor(gen_conf, proj_conf):
     # Get execution options
     opts = gen_conf.get('working_options', {})
     enable_tts = opts.get('enable_tts', False)
+    allow_audio_fallback = opts.get('allow_audio_download_fallback', False)
     max_videos = opts.get('max_videos_per_channel', 3)
     system_prompt = proj_conf.get('system_prompt', "Summarize the video.")
 
@@ -61,26 +62,58 @@ def run_monitor(gen_conf, proj_conf):
             # Save Step 1 Data
             storage.save_step_json(video_id, 'step1_metadata.json', vid)
 
-            # Step 2: Fetch Transcript
+            # Step 2: Fetch Transcript or Audio (Fallback)
             transcript_file = 'step2_transcript.txt'
-            # Check if we already have it
             transcript = storage.load_step_text(video_id, transcript_file)
-            
+            downloaded_audio_path = None
+
             if not transcript:
                 transcript = youtube.get_video_transcript(video_id)
                 if transcript:
                     storage.save_step_text(video_id, transcript_file, transcript)
                 else:
-                    print("     (No transcript available, skipping)")
-                    continue
-            
+                    print("     (No transcript available)")
+                    # Fallback check
+                    if allow_audio_fallback:
+                        # Check if we already downloaded it
+                        # For tracing, we might look for 'step2_audio.mp3' in the storage folder
+                        fallback_audio_filename = 'step2_fallback_audio.mp3'
+                        fallback_audio_path = storage.get_file_path(video_id, fallback_audio_filename)
+
+                        if os.path.exists(fallback_audio_path):
+                            print("     -> Found existing fallback audio.")
+                            downloaded_audio_path = fallback_audio_path
+                        else:
+                            print("     -> Attempting Audio Download Fallback...")
+                            # download_audio returns full path. We want to control the path.
+                            downloaded_path = youtube.download_audio(video_id, fallback_audio_path)
+                            if downloaded_path and os.path.exists(downloaded_path):
+                                downloaded_audio_path = downloaded_path
+                            else:
+                                print("     (Audio download failed, skipping)")
+                                continue
+                    else:
+                        print("     (Fallback disabled, skipping)")
+                        continue
+
             # Step 3: AI Analysis
             analysis_file = 'step3_analysis.json'
             analysis_data = storage.load_step_json(video_id, analysis_file)
             
             if not analysis_data:
                 print("     -> AI Analysis running...")
-                analysis_data = ai.analyze_transcript(transcript, system_prompt, user_prompt, gen_conf)
+                if transcript:
+                    analysis_data = ai.analyze_transcript(transcript, system_prompt, user_prompt, gen_conf)
+                elif downloaded_audio_path:
+                     print("     -> Analyzing Audio via Gemini...")
+                     analysis_data = ai.analyze_audio(downloaded_audio_path, system_prompt, user_prompt, gen_conf)
+
+                     # Optional: Cleanup audio if we don't want to keep it?
+                     # For now, we keep it as part of the 'trace'.
+                else:
+                    print("     (No input data for analysis)")
+                    continue
+
                 storage.save_step_json(video_id, analysis_file, analysis_data)
 
                 # Update DB

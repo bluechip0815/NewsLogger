@@ -33,3 +33,56 @@ def get_video_transcript(video_id):
     except Exception as e:
         print(f"Error fetching transcript for {video_id}: {e}")
         return None
+
+def download_audio(video_id, output_path):
+    """Downloads audio from a YouTube video using yt-dlp."""
+    import yt_dlp
+
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': output_path, # output_path includes filename
+        'quiet': True,
+        'noplaylist': True,
+        # Force mp3 or m4a if strictly needed, but 'bestaudio' usually gives opus/m4a which gemini accepts.
+        # However, yt-dlp appends the extension to outtmpl if not specified strictly.
+        # To strictly force the filename to be exactly what we pass:
+        'outtmpl': {'default': output_path},
+        'force_filename': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+    }
+
+    # We need to strip the extension from output_path for yt-dlp if we want the final file to have that name
+    # OR we let yt-dlp handle it.
+    # Actually, simpler: just download to a temp name and rename, or trust yt-dlp.
+    # Let's try to just use simple download.
+
+    try:
+        # Re-defining opts for safety
+        base, ext = output_path.rsplit('.', 1)
+
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': base, # yt-dlp will add extension
+            'quiet': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '128',
+            }],
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+
+        # yt-dlp automatically adds .mp3
+        final_path = f"{base}.mp3"
+        return final_path
+    except Exception as e:
+        print(f"Error downloading audio for {video_id}: {e}")
+        return None

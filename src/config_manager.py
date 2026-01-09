@@ -32,7 +32,8 @@ def generate_dummy_configs():
             "working_options": {
                 "enable_tts": True,
                 "tts_lang": "en",
-                "max_videos_per_channel": 3
+                "max_videos_per_channel": 3,
+                "allow_audio_download_fallback": True
             }
         }
         with open(GENERAL_CONFIG_FILE, 'w', encoding='utf-8') as f:
