@@ -1,5 +1,4 @@
 import feedparser
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
 def get_new_videos(channel_id, limit=3):
     """Fetches the latest videos via RSS Feed."""
@@ -22,18 +21,6 @@ def get_new_videos(channel_id, limit=3):
 
     return new_videos
 
-def get_video_transcript(video_id):
-    """Fetches transcript using youtube-transcript-api."""
-    try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['de', 'en'])
-        full_text = " ".join([t['text'] for t in transcript_list])
-        return full_text
-    except (TranscriptsDisabled, NoTranscriptFound):
-        return None
-    except Exception as e:
-        print(f"Error fetching transcript for {video_id}: {e}")
-        return None
-
 def download_audio(video_id, output_path):
     """Downloads audio from a YouTube video using yt-dlp."""
     import yt_dlp
@@ -42,25 +29,9 @@ def download_audio(video_id, output_path):
 
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': output_path, # output_path includes filename
         'quiet': True,
         'noplaylist': True,
-        # Force mp3 or m4a if strictly needed, but 'bestaudio' usually gives opus/m4a which gemini accepts.
-        # However, yt-dlp appends the extension to outtmpl if not specified strictly.
-        # To strictly force the filename to be exactly what we pass:
-        'outtmpl': {'default': output_path},
-        'force_filename': True,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
     }
-
-    # We need to strip the extension from output_path for yt-dlp if we want the final file to have that name
-    # OR we let yt-dlp handle it.
-    # Actually, simpler: just download to a temp name and rename, or trust yt-dlp.
-    # Let's try to just use simple download.
 
     try:
         # Re-defining opts for safety
