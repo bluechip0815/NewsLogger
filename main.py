@@ -1,13 +1,5 @@
 import os
-import json
-import smtplib
-import feedparser
-import time
 import argparse
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.audio import MIMEAudio
-from datetime import datetime
 from dotenv import load_dotenv
 
 # Externe Libraries
@@ -17,11 +9,7 @@ import anthropic
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from gtts import gTTS
 
-# ---------------------------------------------------------
-# SETUP & CONFIG
-# ---------------------------------------------------------
-
-# Lädt Umgebungsvariablen aus der .env Datei
+# Load environment variables
 load_dotenv()
 
 SEEN_VIDEOS_FILE = "seen_videos.txt"
@@ -302,63 +290,151 @@ def send_email(results, general_config):
 # ---------------------------------------------------------
 
 def run_monitor(gen_conf, proj_conf):
-    seen_videos = get_seen_videos()
-    processing_results = []
-    
+    # Initialize DB
+    database.init_db()
+
+    # Get execution options
     opts = gen_conf.get('working_options', {})
     enable_tts = opts.get('enable_tts', False)
+    allow_audio_fallback = opts.get('allow_audio_download_fallback', False)
     max_videos = opts.get('max_videos_per_channel', 3)
+    system_prompt = proj_conf.get('system_prompt', "Summarize the video.")
 
-    # 2. Kanäle durchlaufen
+    email_results = []
+
     for sub in proj_conf['subscriptions']:
-        print(f"Prüfe Kanal: {sub['channel_name']}...")
+        channel_name = sub['channel_name']
+        channel_id = sub['channel_id']
+        # Handle 'user_prompt' vs legacy 'analysis_prompt'
+        user_prompt = sub.get('user_prompt', sub.get('analysis_prompt', "Focus on key points."))
         
-        new_vids = get_new_videos(sub['channel_id'], seen_videos, limit=max_videos)
+        print(f"Checking channel: {channel_name}...")
+
+        # Update Channel in DB
+        database.upsert_channel(channel_id, channel_name, user_prompt)
+
+        # Step 1: Fetch Metadata
+        new_vids = youtube.get_new_videos(channel_id, limit=max_videos)
         
         if not new_vids:
-            print("  -> Keine neuen Videos.")
+            print("  -> No new videos.")
             continue
             
         for vid in new_vids:
-            print(f"  -> Verarbeite: {vid['title']}")
+            video_id = vid['id']
+            video_title = vid['title']
+            published = vid['published']
+
+            # Check if processed or exists in DB
+            db_video = database.get_video(video_id)
+            if db_video:
+                # If status is 'emailed', skip. If 'processed', maybe re-email or skip.
+                # For now, let's assume if it exists in DB, we skip unless we want to retry failed steps.
+                # But requirement says "next step should work on this folder".
+                # Let's assume we skip if status is 'emailed'.
+                if db_video[4] == 'emailed':
+                    print(f"  -> Skipping processed video: {video_title}")
+                    continue
+            else:
+                database.add_video(video_id, channel_id, video_title, published, 'new')
+
+            print(f"  -> Processing: {video_title}")
             
-            # Transkript holen
-            transcript = get_video_transcript(vid['id'])
-            
+            # Save Step 1 Data
+            storage.save_step_json(video_id, 'step1_metadata.json', vid)
+
+            # Step 2: Fetch Transcript or Audio (Fallback)
+            transcript_file = 'step2_transcript.txt'
+            transcript = storage.load_step_text(video_id, transcript_file)
+            downloaded_audio_path = None
+
             if not transcript:
-                print("     (Kein Transkript verfügbar, überspringe)")
-                continue
-            
-            # KI Analyse
-            print("     -> KI Analyse läuft...")
-            summary = analyze_transcript(transcript, sub['analysis_prompt'], gen_conf)
-            
-            result_entry = {
-                'channel': sub['channel_name'],
-                'title': vid['title'],
-                'link': vid['link'],
-                'id': vid['id'],
-                'summary': summary,
-                'audio_file': None
-            }
+                transcript = youtube.get_video_transcript(video_id)
+                if transcript:
+                    storage.save_step_text(video_id, transcript_file, transcript)
+                else:
+                    print("     (No transcript available)")
+                    # Fallback check
+                    if allow_audio_fallback:
+                        # Check if we already downloaded it
+                        # For tracing, we might look for 'step2_audio.mp3' in the storage folder
+                        fallback_audio_filename = 'step2_fallback_audio.mp3'
+                        fallback_audio_path = storage.get_file_path(video_id, fallback_audio_filename)
 
-            # TTS Generierung (Optional)
+                        if os.path.exists(fallback_audio_path):
+                            print("     -> Found existing fallback audio.")
+                            downloaded_audio_path = fallback_audio_path
+                        else:
+                            print("     -> Attempting Audio Download Fallback...")
+                            # download_audio returns full path. We want to control the path.
+                            downloaded_path = youtube.download_audio(video_id, fallback_audio_path)
+                            if downloaded_path and os.path.exists(downloaded_path):
+                                downloaded_audio_path = downloaded_path
+                            else:
+                                print("     (Audio download failed, skipping)")
+                                continue
+                    else:
+                        print("     (Fallback disabled, skipping)")
+                        continue
+
+            # Step 3: AI Analysis
+            analysis_file = 'step3_analysis.json'
+            analysis_data = storage.load_step_json(video_id, analysis_file)
+            
+            if not analysis_data:
+                print("     -> AI Analysis running...")
+                if transcript:
+                    analysis_data = ai.analyze_transcript(transcript, system_prompt, user_prompt, gen_conf)
+                elif downloaded_audio_path:
+                     print("     -> Analyzing Audio via Gemini...")
+                     analysis_data = ai.analyze_audio(downloaded_audio_path, system_prompt, user_prompt, gen_conf)
+
+                     # Optional: Cleanup audio if we don't want to keep it?
+                     # For now, we keep it as part of the 'trace'.
+                else:
+                    print("     (No input data for analysis)")
+                    continue
+
+                storage.save_step_json(video_id, analysis_file, analysis_data)
+
+                # Update DB
+                database.update_video_summary(video_id, analysis_data.get('summary', ''))
+                for kw in analysis_data.get('keywords', []):
+                    database.add_keyword(video_id, kw)
+
+                database.update_video_status(video_id, 'processed')
+
+            # Step 4: TTS
+            audio_path = None
             if enable_tts:
-                print("     -> Generiere Audio...")
-                audio_file = generate_audio_summary(summary, vid['id'], opts.get('tts_lang', 'de'))
-                result_entry['audio_file'] = audio_file
+                audio_filename = 'step4_audio.mp3'
+                audio_path = storage.get_file_path(video_id, audio_filename)
 
-            processing_results.append(result_entry)
+                if not os.path.exists(audio_path):
+                    print("     -> Generating Audio...")
+                    summary_text = analysis_data.get('summary', '')
+                    if summary_text:
+                        tts.generate_audio_summary(summary_text, audio_path, opts.get('tts_lang', 'en'))
 
-    # 3. Bericht senden & Status updaten
-    if processing_results:
-        print(f"Sende Bericht mit {len(processing_results)} Analysen...")
-        success = send_email(processing_results, gen_conf)
+            # Collect result for email
+            email_results.append({
+                'channel': channel_name,
+                'title': video_title,
+                'link': vid['link'],
+                'id': video_id,
+                'summary': analysis_data.get('summary', ''),
+                'keywords': analysis_data.get('keywords', []),
+                'audio_file': audio_path if enable_tts and os.path.exists(audio_path) else None
+            })
+
+    # Step 5: Report / Email
+    if email_results:
+        print(f"Sending report with {len(email_results)} items...")
+        success = email_sender.send_email(email_results, gen_conf)
         
         if success:
-            # Nur als 'gesehen' markieren, wenn Email rausging
-            for item in processing_results:
-                save_seen_video(item['id'])
+            for item in email_results:
+                database.update_video_status(item['id'], 'emailed')
     else:
         print("Nichts zu berichten.")
 
@@ -499,14 +575,24 @@ def main():
 
     # Load configs
     try:
-        gen_conf = load_json('general_config.json')
-        proj_conf = load_json('project_config.json')
-    except FileNotFoundError:
-        print("Fehler: Konfigurationsdateien nicht gefunden. Nutze --generate-config um Dummy-Dateien zu erstellen.")
+        gen_conf, proj_conf = load_configs()
+    except Exception as e:
+        print(f"Error: {e}")
         return
 
     if args.test_email:
-        test_email_config(gen_conf)
+        # Dummy result for testing
+        print("Sending test email...")
+        dummy_results = [{
+            'channel': 'Test Channel',
+            'title': 'Test Video Title',
+            'link': 'https://www.youtube.com',
+            'id': 'test_video_id',
+            'summary': 'This is a test summary.',
+            'keywords': ['test', 'email'],
+            'audio_file': None
+        }]
+        email_sender.send_email(dummy_results, gen_conf)
     elif args.test_tts:
         test_tts(args.test_tts[0])
     elif args.test_youtube:
@@ -514,7 +600,7 @@ def main():
     elif args.test_ai:
         test_ai_connections()
     else:
-        print("Starte YouTube Monitor...")
+        print("Starting YouTube Monitor...")
         run_monitor(gen_conf, proj_conf)
 
 if __name__ == "__main__":

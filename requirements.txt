@@ -3,5 +3,6 @@ python-dotenv
 google-generativeai
 youtube-transcript-api
 gTTS
+yt-dlp
 openai
 anthropic
