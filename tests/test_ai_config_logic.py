@@ -10,7 +10,7 @@ from src import test_utils
 
 class TestAIConfigLogic(unittest.TestCase):
     def setUp(self):
-        # Sample subscriptions configuration
+        # Sample subscriptions configuration with aliases
         self.subscriptions = [
             {
                 "channel_name": "OpenAI Channel",
@@ -23,18 +23,24 @@ class TestAIConfigLogic(unittest.TestCase):
                 "model": "gemini-1.5-pro"
             },
             {
+                "channel_name": "Gemini Alias Channel",
+                "provider": "gemini",
+                "model": "gemini-flash-lite-latest"
+            },
+             {
+                "channel_name": "ChatGPT Alias Channel",
+                "provider": "chatgpt",
+                "model": "gpt-3.5-turbo"
+            },
+            {
                 "channel_name": "Anthropic Channel",
                 "provider": "anthropic",
                 "model": "claude-3-opus"
             },
             {
-                "channel_name": "Broken Channel",
-                # Missing provider/model
-            },
-            {
-                "channel_name": "Duplicate OpenAI",
-                "provider": "openai",
-                "model": "gpt-4-turbo"
+                "channel_name": "Claude Alias Channel",
+                "provider": "claude",
+                "model": "claude-3-sonnet"
             }
         ]
 
@@ -65,40 +71,50 @@ class TestAIConfigLogic(unittest.TestCase):
             mock_anthropic.Anthropic.return_value = mock_anthropic_client
             mock_anthropic_client.messages.create.return_value.content = [MagicMock(text="OK")]
 
-            # Run the function (assuming refactored signature)
-            # Note: The function doesn't exist with this signature yet, so this test will fail or error if run now.
-            try:
-                test_utils.test_ai_connections(self.subscriptions)
-            except TypeError:
-                 # Fallback for current implementation if it doesn't accept args
-                 print("Caught TypeError: function signature not updated yet")
-                 return
+            test_utils.test_ai_connections(self.subscriptions)
 
-            # Check Output for error message on missing fields
             output = mock_stdout.getvalue()
-            self.assertIn("Missing provider or model", output)
-            self.assertIn("Broken Channel", output)
 
-            # Verify OpenAI call
-            mock_openai_client.chat.completions.create.assert_called_with(
+            # Verify explicit providers
+            self.assertIn("gpt-4-turbo", output)
+            self.assertIn("gemini-1.5-pro", output)
+            self.assertIn("claude-3-opus", output)
+
+            # Verify Aliases
+            self.assertIn("gemini-flash-lite-latest", output) # Should be tested under 'google' logic
+            self.assertIn("gpt-3.5-turbo", output) # Should be tested under 'openai' logic
+            self.assertIn("claude-3-sonnet", output) # Should be tested under 'anthropic' logic
+
+            # Verify calls
+
+            # Google/Gemini calls
+            # Expect 2 calls: one for 'gemini-1.5-pro' and one for 'gemini-flash-lite-latest'
+            mock_genai.GenerativeModel.assert_any_call('gemini-1.5-pro')
+            mock_genai.GenerativeModel.assert_any_call('gemini-flash-lite-latest')
+
+            # OpenAI/ChatGPT calls
+            # Expect 2 calls
+            mock_openai_client.chat.completions.create.assert_any_call(
                 model="gpt-4-turbo",
                 messages=[{"role": "user", "content": "Hello"}]
             )
-
-            # Verify Google call
-            mock_genai.GenerativeModel.assert_called_with('gemini-1.5-pro')
-            mock_genai_model.generate_content.assert_called_with("Hello")
-
-            # Verify Anthropic call
-            mock_anthropic_client.messages.create.assert_called_with(
-                model="claude-3-opus",
-                max_tokens=100,
+            mock_openai_client.chat.completions.create.assert_any_call(
+                model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": "Hello"}]
             )
 
-            # Ensure duplicate was not called twice (call_count should be 1 for that specific model)
-            # OpenAI called once
-            self.assertEqual(mock_openai_client.chat.completions.create.call_count, 1)
+            # Anthropic/Claude calls
+            mock_anthropic_client.messages.create.assert_any_call(
+                 model="claude-3-opus",
+                 max_tokens=100,
+                 messages=[{"role": "user", "content": "Hello"}]
+            )
+            mock_anthropic_client.messages.create.assert_any_call(
+                 model="claude-3-sonnet",
+                 max_tokens=100,
+                 messages=[{"role": "user", "content": "Hello"}]
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -76,6 +76,15 @@ def test_ai_connections(subscriptions):
             print(f"Error: Subscription for channel '{channel_name}' is Missing provider or model")
             continue
 
+        # Normalize provider
+        provider = provider.lower().strip()
+        if provider == 'gemini':
+            provider = 'google'
+        elif provider == 'chatgpt':
+            provider = 'openai'
+        elif provider == 'claude':
+            provider = 'anthropic'
+
         unique_combinations.add((provider, model))
 
     for provider, model in unique_combinations:
