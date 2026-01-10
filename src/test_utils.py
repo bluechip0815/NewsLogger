@@ -61,62 +61,75 @@ def test_youtube_channels(proj_conf):
         except Exception as e:
              print(f"ERROR: {e}")
 
-def test_ai_connections():
-    """Checks connections for all configured AI secrets in .env."""
-    print("Testing AI connections...")
+def test_ai_connections(proj_conf):
+    """Checks connections for AI providers configured in project_config.json."""
+    print("Testing AI connections based on configuration...")
 
-    # 1. Gemini
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    if gemini_key:
-        print("Checking Gemini... ", end="")
+    # Extract unique provider/model pairs
+    providers_to_test = set()
+    for sub in proj_conf.get('subscriptions', []):
+        provider = sub.get('provider')
+        model = sub.get('model')
+        if provider and model:
+            providers_to_test.add((provider.lower(), model))
+
+    if not providers_to_test:
+        print("No providers found in project_config.json subscriptions.")
+        return
+
+    for provider, model_name in providers_to_test:
+        print(f"Testing {provider} ({model_name})... ", end="")
+
         try:
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content("Hello")
-            if response:
-                print("OK")
+            if provider == 'google':
+                api_key = os.getenv("GEMINI_API_KEY")
+                if not api_key:
+                    print("FAILED (GEMINI_API_KEY missing)")
+                    continue
+
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content("Hello")
+                if response:
+                    print("OK")
+                else:
+                    print("FAILED (No response)")
+
+            elif provider == 'openai':
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    print("FAILED (OPENAI_API_KEY missing)")
+                    continue
+
+                client = openai.OpenAI(api_key=api_key)
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": "Hello"}]
+                )
+                if response.choices[0].message.content:
+                    print("OK")
+                else:
+                    print("FAILED (No content)")
+
+            elif provider == 'anthropic':
+                api_key = os.getenv("ANTHROPIC_API_KEY")
+                if not api_key:
+                    print("FAILED (ANTHROPIC_API_KEY missing)")
+                    continue
+
+                client = anthropic.Anthropic(api_key=api_key)
+                response = client.messages.create(
+                    model=model_name,
+                    max_tokens=100,
+                    messages=[{"role": "user", "content": "Hello"}]
+                )
+                if response.content[0].text:
+                    print("OK")
+                else:
+                    print("FAILED (No content)")
+
             else:
-                print("FAILED (No response)")
+                print(f"FAILED (Unknown provider: {provider})")
+
         except Exception as e:
             print(f"FAILED ({e})")
-    else:
-        print("Skipping Gemini (GEMINI_API_KEY not found)")
-
-    # 2. OpenAI
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
-        print("Checking OpenAI... ", end="")
-        try:
-            client = openai.OpenAI(api_key=openai_key)
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": "Hello"}]
-            )
-            if response.choices[0].message.content:
-                print("OK")
-            else:
-                print("FAILED (No content)")
-        except Exception as e:
-            print(f"FAILED ({e})")
-    else:
-        print("Skipping OpenAI (OPENAI_API_KEY not found)")
-
-    # 3. Anthropic
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    if anthropic_key:
-        print("Checking Anthropic... ", end="")
-        try:
-            client = anthropic.Anthropic(api_key=anthropic_key)
-            response = client.messages.create(
-                model="claude-3-5-sonnet-20240620",
-                max_tokens=100,
-                messages=[{"role": "user", "content": "Hello"}]
-            )
-            if response.content[0].text:
-                print("OK")
-            else:
-                print("FAILED (No content)")
-        except Exception as e:
-            print(f"FAILED ({e})")
-    else:
-        print("Skipping Anthropic (ANTHROPIC_API_KEY not found)")
