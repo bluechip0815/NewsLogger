@@ -1,9 +1,12 @@
 {
+    "system_prompt": "Summarize the video.",
     "subscriptions": [
         {
             "channel_name": "Example Channel",
             "channel_id": "UCxxxxxxxxxxxx",
-            "analysis_prompt": "Summarize this video."
+            "user_prompt": "Focus on key points.",
+            "provider": "google",
+            "model": "gemini-1.5-flash"
         }
     ]
 }
