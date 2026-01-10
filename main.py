@@ -190,7 +190,7 @@ def main():
     elif args.test_youtube:
         test_utils.test_youtube_channels(proj_conf)
     elif args.test_ai:
-        test_utils.test_ai_connections()
+        test_utils.test_ai_connections(proj_conf['subscriptions'])
     else:
         print("Starting YouTube Monitor...")
         run_monitor(gen_conf, proj_conf)
